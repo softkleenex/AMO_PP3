@@ -7,7 +7,7 @@
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## To Do
-- [ ] Integrate real local LLM (e.g. Ollama/vLLM) to replace mock.
+- [ ] Setup Kaggle API for Model/Dataset Upload.
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## In Progress
@@ -21,3 +21,4 @@
 - [x] Research AIME/IMO math solvers (LLM prompting strategies vs symbolic solvers).
 - [x] Implement PythonREPL for code execution (Tool-Integrated Reasoning).
 - [x] Implement basic Code-Interpreter Solver (Prompt -> Code -> Execute).
+- [x] Integrate real local LLM (Qwen2.5-Math-1.5B via Transformers).
