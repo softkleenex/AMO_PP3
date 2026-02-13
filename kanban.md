@@ -7,7 +7,6 @@
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## To Do
-- [ ] Download public test data (if available via API) or create dummy data.
 - [ ] Research AIME/IMO math solvers (LLM prompting strategies vs symbolic solvers).
 - [ ] Create data processing pipeline for the 110 problems.
 
@@ -18,3 +17,4 @@
 - [x] Create documentation and workflow.
 - [x] Connect to GitHub remote.
 - [x] Set up "Hello World" submission notebook.
+- [x] Download public test data (including 'kaggle_evaluation' module).
