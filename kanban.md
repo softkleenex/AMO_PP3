@@ -7,8 +7,7 @@
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## To Do
-- [ ] Setup Kaggle API for Model/Dataset Upload.
-- [ ] Refine Prompt Engineering for specific problem types.
+- [ ] Test V2 pipeline on full local dataset.
 
 ## In Progress
 
@@ -23,3 +22,6 @@
 - [x] Implement basic Code-Interpreter Solver (Prompt -> Code -> Execute).
 - [x] Integrate real local LLM (Qwen2.5-Math-1.5B via Transformers).
 - [x] Create data processing pipeline for the 110 problems (loader & prompt formatter).
+- [x] Setup Kaggle API for Model/Dataset Upload (Created 'aimo-pp3-source').
+- [x] Create deploy script for code updates (`make deploy msg="..."`).
+- [x] Refine Prompt Engineering (Implemented Self-Correction & CoT Fallback).
