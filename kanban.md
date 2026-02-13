@@ -7,11 +7,13 @@
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## To Do
-- [ ] Test V2 pipeline on full local dataset.
 
 ## In Progress
 
 ## Done
+- [x] Create Kaggle Notebook template importing OOP baseline.
+- [x] Create OOP Baseline (src/kaggle_baseline.py) for robust path/model handling.
+- [x] Test V2 pipeline on full local dataset (Results: 0% with Mock LLM).
 - [x] Initialize project structure.
 - [x] Create documentation and workflow.
 - [x] Connect to GitHub remote.

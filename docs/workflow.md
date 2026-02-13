@@ -31,6 +31,19 @@ Since internet access is disabled during inference, external libraries must be u
 **Option B: Single Script (Simpler)**
 - Use a build script to concatenate `src/` files into a single submission notebook if the logic is simple enough.
 
+**Option C: OOP Baseline Utility Script (Recommended)**
+- We have created a robust, self-contained baseline in `src/kaggle_baseline.py`.
+- **Steps:**
+    1. Upload `src/kaggle_baseline.py` as a Kaggle Dataset (e.g., named `aimo-modules`).
+    2. In your Kaggle Notebook, add this dataset.
+    3. Import the baseline:
+       ```python
+       import sys
+       sys.path.append('/kaggle/input/aimo-modules')
+       from kaggle_baseline import CompetitionConfig, AIMSolver
+       ```
+    4. The code automatically detects if it's running Locally (using `./data`) or on Kaggle (using `/kaggle/input`).
+
 ## 4. Submission
 - Use the official Kaggle API notebook template.
 - Ensure the `aimo` evaluation API is handled correctly.
