@@ -7,8 +7,7 @@
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## To Do
-- [ ] Implement PythonREPL for code execution (Tool-Integrated Reasoning).
-- [ ] Implement basic Code-Interpreter Solver (Prompt -> Code -> Execute).
+- [ ] Integrate real local LLM (e.g. Ollama/vLLM) to replace mock.
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## In Progress
@@ -20,3 +19,5 @@
 - [x] Set up "Hello World" submission notebook.
 - [x] Download public test data (including 'kaggle_evaluation' module).
 - [x] Research AIME/IMO math solvers (LLM prompting strategies vs symbolic solvers).
+- [x] Implement PythonREPL for code execution (Tool-Integrated Reasoning).
+- [x] Implement basic Code-Interpreter Solver (Prompt -> Code -> Execute).
