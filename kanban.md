@@ -8,7 +8,7 @@
 
 ## To Do
 - [ ] Setup Kaggle API for Model/Dataset Upload.
-- [ ] Create data processing pipeline for the 110 problems.
+- [ ] Refine Prompt Engineering for specific problem types.
 
 ## In Progress
 
@@ -22,3 +22,4 @@
 - [x] Implement PythonREPL for code execution (Tool-Integrated Reasoning).
 - [x] Implement basic Code-Interpreter Solver (Prompt -> Code -> Execute).
 - [x] Integrate real local LLM (Qwen2.5-Math-1.5B via Transformers).
+- [x] Create data processing pipeline for the 110 problems (loader & prompt formatter).
