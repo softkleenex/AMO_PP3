@@ -7,7 +7,8 @@
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## To Do
-- [ ] Research AIME/IMO math solvers (LLM prompting strategies vs symbolic solvers).
+- [ ] Implement PythonREPL for code execution (Tool-Integrated Reasoning).
+- [ ] Implement basic Code-Interpreter Solver (Prompt -> Code -> Execute).
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## In Progress
@@ -18,3 +19,4 @@
 - [x] Connect to GitHub remote.
 - [x] Set up "Hello World" submission notebook.
 - [x] Download public test data (including 'kaggle_evaluation' module).
+- [x] Research AIME/IMO math solvers (LLM prompting strategies vs symbolic solvers).
