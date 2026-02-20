@@ -1,15 +1,17 @@
 # Project Kanban
 
 ## Backlog
-- [ ] Implement Majority Voting / Self-Consistency.
-- [ ] Create data processing pipeline for the 110 problems.
+- [ ] Implement data augmentation (e.g., question rephrasing).
+- [ ] Explore symbolic solvers (SymPy, Lean) integration.
 
 ## To Do
+- [ ] Create data processing pipeline for the 110 problems.
 - [ ] Analyze Kaggle Submission Results.
 
 ## In Progress
 
 ## Done
+- [x] Implement Majority Voting / Self-Consistency (src/kaggle_baseline.py).
 - [x] Implement Few-Shot Prompting in Baseline (src/kaggle_baseline.py).
 - [x] Implement local validation loop (using the 10 reference problems).
 - [x] Create Kaggle Notebook template importing OOP baseline.

@@ -6,6 +6,7 @@ import contextlib
 import signal
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
+from collections import Counter
 
 # ==========================================
 # 1. Configuration & Environment Handling
@@ -20,8 +21,9 @@ class CompetitionConfig:
         if self.is_kaggle:
             self.base_dir = "/kaggle/input"
             self.work_dir = "/kaggle/working"
-            # Typical Kaggle Model Path (Example)
-            self.model_path = "/kaggle/input/qwen2.5-math-7b/transformers/default/1" 
+            # Path to the specific model directory in Kaggle
+            # User must add 'Qwen/Qwen2.5-Math-7B-Instruct' as a model/dataset
+            self.model_path = "/kaggle/input/qwen2.5-math-7b-instruct" 
         else:
             self.base_dir = "./data"
             self.work_dir = "./submissions"
@@ -30,6 +32,7 @@ class CompetitionConfig:
         # Common Settings
         self.timeout_seconds = 7
         self.max_retries = 2
+        self.n_repetitions = 5 # Majority Voting Count
         self.debug = True
 
     def get_dataset_path(self, filename: str) -> str:
@@ -59,7 +62,9 @@ class MockLLM(LLMInterface):
     def generate(self, prompt: str) -> str:
         if "step-by-step" in prompt:
             return "The answer is \\boxed{42}."
-        return "print(42)"
+        # Randomize slightly for voting test
+        import random
+        return f"print({random.choice([42, 42, 42, 0])})"
 
 # Placeholder for real vLLM or HF implementation
 class LocalVLLM(LLMInterface):
@@ -67,7 +72,7 @@ class LocalVLLM(LLMInterface):
         # try:
         #     from vllm import LLM, SamplingParams
         #     self.model = LLM(model=model_path, trust_remote_code=True)
-        #     self.params = SamplingParams(temperature=0.0, max_tokens=512)
+        #     self.params = SamplingParams(temperature=0.7, max_tokens=1024)
         # except ImportError:
         #     print("vLLM not installed. Using Mock.")
         pass
@@ -132,9 +137,9 @@ class AIMSolver:
         if numbers:
             try:
                 val = int(numbers[-1])
-                return val % 1000 # AIMO usually requires mod 1000 answer format check!
+                return val % 1000 
             except: pass
-        return 0
+        return -1 # Indicator for no answer found
 
     def format_prompt(self, problem: str, mode: str = "code", error: str = None) -> str:
         if mode == "code":
@@ -163,7 +168,7 @@ class AIMSolver:
             )
         return f"Solve step-by-step. Put answer in \\boxed{{}}.\nProblem: {problem}"
 
-    def solve(self, problem_text: str) -> int:
+    def _solve_single(self, problem_text: str) -> int:
         # Strategy: Code Gen -> Retry -> CoT
         
         # 1. Initial Code Attempt
@@ -191,3 +196,21 @@ class AIMSolver:
         prompt = self.format_prompt(problem_text, "cot")
         response = self.llm.generate(prompt)
         return self.extract_answer(response)
+
+    def solve(self, problem_text: str) -> int:
+        """
+        Executes majority voting (self-consistency).
+        """
+        answers = []
+        for _ in range(self.config.n_repetitions):
+            ans = self._solve_single(problem_text)
+            if ans >= 0: # valid answer
+                answers.append(ans)
+        
+        if not answers:
+            return 0
+            
+        # Majority Vote
+        counts = Counter(answers)
+        most_common, count = counts.most_common(1)[0]
+        return most_common
