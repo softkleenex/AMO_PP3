@@ -1,16 +1,17 @@
 # Project Kanban
 
 ## Backlog
-- [ ] Set up "Hello World" submission notebook.
-- [ ] Implement local validation loop (using the 10 reference problems).
-- [ ] Research AIME/IMO math solvers (LLM prompting strategies vs symbolic solvers).
+- [ ] Implement Majority Voting / Self-Consistency.
 - [ ] Create data processing pipeline for the 110 problems.
 
 ## To Do
+- [ ] Analyze Kaggle Submission Results.
 
 ## In Progress
 
 ## Done
+- [x] Implement Few-Shot Prompting in Baseline (src/kaggle_baseline.py).
+- [x] Implement local validation loop (using the 10 reference problems).
 - [x] Create Kaggle Notebook template importing OOP baseline.
 - [x] Create OOP Baseline (src/kaggle_baseline.py) for robust path/model handling.
 - [x] Test V2 pipeline on full local dataset (Results: 0% with Mock LLM).

@@ -58,7 +58,7 @@ class MockLLM(LLMInterface):
     """Used for testing pipeline without loading heavy models."""
     def generate(self, prompt: str) -> str:
         if "step-by-step" in prompt:
-            return "The answer is \boxed{42}."
+            return "The answer is \\boxed{42}."
         return "print(42)"
 
 # Placeholder for real vLLM or HF implementation
@@ -120,14 +120,12 @@ class AIMSolver:
         self.executor = CodeExecutor(timeout=config.timeout_seconds)
 
     def extract_code(self, text: str) -> str:
-        match = re.search(r'```python
-(.*?)
-```', text, re.DOTALL)
+        match = re.search(r'```python\n(.*?)\n```', text, re.DOTALL)
         return match.group(1) if match else text
 
     def extract_answer(self, text: str) -> int:
         # 1. Boxed
-        match = re.search(r'\boxed\{(\d+)\}', text)
+        match = re.search(r'\\boxed\{(\d+)\}', text)
         if match: return int(match.group(1))
         # 2. Last number fallback
         numbers = re.findall(r'\d+', text)
@@ -140,25 +138,30 @@ class AIMSolver:
 
     def format_prompt(self, problem: str, mode: str = "code", error: str = None) -> str:
         if mode == "code":
+            examples = (
+                "Problem: Find the sum of the first 10 integers.\n"
+                "Code:\n"
+                "```python\n"
+                "print(sum(range(1, 11)))\n"
+                "```\n\n"
+                "Problem: What is the remainder when 123 is divided by 10?\n"
+                "Code:\n"
+                "```python\n"
+                "print(123 % 10)\n"
+                "```\n\n"
+            )
             return (
                 "Write a Python script to solve this math problem. "
-                "Print the answer at the end.
-
-"
-                f"Problem: {problem}
-
-Code:"
+                "Print the answer at the end.\n\n"
+                f"{examples}"
+                f"Problem: {problem}\n\nCode:"
             )
         elif mode == "fix":
             return (
-                f"Previous code error: {error}
-"
-                "Fix the code and solve:
-
-Code:"
+                f"Previous code error: {error}\n"
+                "Fix the code and solve:\n\nCode:"
             )
-        return f"Solve step-by-step. Put answer in \boxed{{}}.
-Problem: {problem}"
+        return f"Solve step-by-step. Put answer in \\boxed{{}}.\nProblem: {problem}"
 
     def solve(self, problem_text: str) -> int:
         # Strategy: Code Gen -> Retry -> CoT
