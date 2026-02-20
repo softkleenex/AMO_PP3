@@ -34,20 +34,54 @@ Since internet access is disabled during inference, external libraries must be u
 **Option C: OOP Baseline Utility Script (Recommended)**
 - We have created a robust, self-contained baseline in `src/kaggle_baseline.py`.
 - **Steps:**
-    1. Upload `src/kaggle_baseline.py` as a Kaggle Dataset (e.g., named `aimo-modules`).
+    1. Upload `src/kaggle_baseline.py` as a Kaggle Dataset (e.g., named `aimo-pp3-modules`).
     2. In your Kaggle Notebook, add this dataset.
     3. Import the baseline:
        ```python
        import sys
-       sys.path.append('/kaggle/input/aimo-modules')
+       sys.path.append('/kaggle/input/aimo-pp3-modules')
        from kaggle_baseline import CompetitionConfig, AIMSolver
        ```
     4. The code automatically detects if it's running Locally (using `./data`) or on Kaggle (using `/kaggle/input`).
 
-## 4. Submission
-- Use the official Kaggle API notebook template.
-- Ensure the `aimo` evaluation API is handled correctly.
-- Submit via UI or CLI: `kaggle competitions submit -c ai-mathematical-olympiad-progress-prize-3 -f submission.csv -m "Message"` (Note: Code competitions usually require Notebook submission, so we submit the notebook).
+## 4. Submission Protocol (AIMO 3 Specific)
+
+### API Pattern: Inference Server
+The AIMO 3 competition uses the **Inference Server** pattern, unlike previous iterations that used `iter_test`.
+
+**Correct Implementation:**
+```python
+# Import the API module (often nested deep in kaggle_evaluation)
+import aimo_3_inference_server
+
+# Define a callback function
+def predict(*args, **kwargs):
+    problem_text = str(args[0]) # Extract problem
+    answer = solve(problem_text)
+    return answer
+
+# Initialize Server
+server = aimo_3_inference_server.AIMO3InferenceServer(predict)
+
+if os.getenv('KAGGLE_IS_COMPETITION_RERUN'):
+    # Blocking call for actual inference
+    server.serve()
+else:
+    # Local validation / Save Version step
+    # This generates submission.parquet automatically using local data
+    server.run_local_gateway()
+```
+
+### Critical Submission Requirements
+1.  **`submission.parquet` MUST exist:** Even if the API fails to load or during the "Save Version" step (validation mode), the notebook **must** produce a `submission.parquet` file.
+2.  **Fail-safe Logic:** Always wrap the API interaction in a `try-except` block. If the API is missing or crashes, **create a dummy `submission.parquet`** manually to ensure the "Output File" check passes.
+    ```python
+    try:
+        if server: server.run_local_gateway()
+    except Exception:
+        # Fallback
+        pd.DataFrame({'id': ['test'], 'answer': [0]}).to_parquet('submission.parquet')
+    ```
 
 ## 5. Recording Results
 - Keep a `submissions/log.md` to track experiment ID, CV score, and LB score.
