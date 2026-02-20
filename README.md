@@ -15,4 +15,5 @@
 
 ## Workflow
 See `docs/workflow.md` for details on the development pipeline using Gemini CLI, Kaggle, and GitHub.
+See `docs/submission_protocol.md` for **CRITICAL** details on the AIMO 3 Inference Server API and avoiding "Submission File Not Found" errors.
 See `docs/algorithm_v2.md` for the detailed logic of the solver (TIR + CoT Fallback).
