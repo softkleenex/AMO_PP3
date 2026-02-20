@@ -11,6 +11,7 @@
 ## In Progress
 
 ## Done
+- [x] Fix submission.parquet requirement in notebook (Explicitly write parquet).
 - [x] Implement Majority Voting / Self-Consistency (src/kaggle_baseline.py).
 - [x] Implement Few-Shot Prompting in Baseline (src/kaggle_baseline.py).
 - [x] Implement local validation loop (using the 10 reference problems).
