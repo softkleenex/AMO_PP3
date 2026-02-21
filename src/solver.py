@@ -1,66 +1,67 @@
-from utils import PythonREPL, extract_answer
-from data_loader import format_prompt
 import re
+from .utils import CodeExecutor, extract_answer
+from .data_loader import format_prompt
 
-# Placeholder for the actual LLM generation function.
-# In production/notebook, this is monkey-patched.
-def mock_llm_generate_code(prompt: str) -> str:
-    # Heuristic responses for testing logic flow
-    if "fix the error" in prompt:
-        return "print(336) # Fixed code"
-    if "10^{5}" in prompt:
-        return "print(1/0) # Intentionally cause error to test retry"
-    if "1-1" in prompt:
-        return "print(0)"
-    if "step-by-step" in prompt: # CoT fallback
-        return "The answer is \\boxed{42}."
-    
-    return "print(0)"
+class AIMSolver:
+    """
+    Main Solver Logic for AI Mathematical Olympiad.
+    Implements Tool-Integrated Reasoning (TIR) with Self-Correction and CoT Fallback.
+    """
+    def __init__(self, llm_generate_func, timeout=7):
+        self.generate = llm_generate_func
+        self.executor = CodeExecutor(timeout=timeout)
 
-def solve(problem_text: str, model_generate_func=None) -> int:
-    """
-    Robust Solver Pipeline:
-    1. Try Python Code Generation
-    2. If Error, Try Self-Correction
-    3. If still Error or 0, Try Chain-of-Thought
-    """
-    generate = model_generate_func if model_generate_func else mock_llm_generate_code
-    repl = PythonREPL(timeout=7)
-    
-    # --- ATTEMPT 1: Code Gen ---
-    prompt = format_prompt(problem_text, "qwen_code")
-    response = generate(prompt)
-    
-    # Extract code
-    code = response
-    match = re.search(r'```python\n(.*?)\n```', response, re.DOTALL)
-    if match:
-        code = match.group(1)
+    def extract_python_code(self, text: str) -> str:
+        """Parses markdown-wrapped Python code blocks."""
+        match = re.search(r'```python\n(.*?)\n```', text, re.DOTALL)
+        return match.group(1) if match else text
+
+    def solve_single_attempt(self, problem_text: str) -> int:
+        """
+        Single solving attempt: Code Gen -> Retry -> CoT Fallback.
+        """
+        # 1. Initial Python Code Generation
+        prompt = format_prompt(problem_text, "qwen_code")
+        response = self.generate(prompt)
+        code = self.extract_python_code(response)
+        output = self.executor.execute(code)
         
-    output = repl.execute(code)
-    
-    # --- ATTEMPT 2: Self-Correction (if needed) ---
-    if "Error" in output:
-        # print(f"DEBUG: Error encountered: {output}. Retrying...")
-        prompt = format_prompt(problem_text, "fix_code", error_msg=output)
-        response = generate(prompt)
-        
-        match = re.search(r'```python\n(.*?)\n```', response, re.DOTALL)
-        if match:
-            code = match.group(1)
-        output = repl.execute(code)
-    
-    # Extract answer from code output
-    ans = extract_answer(output)
-    
-    # --- ATTEMPT 3: Chain-of-Thought Fallback ---
-    # If answer is 0 (default/failure) or we had persistent errors
-    if ans == 0 or "Error" in output:
-        # print("DEBUG: Fallback to CoT...")
+        # 2. Self-Correction Retry if Error
+        if "Error" in output:
+            prompt = format_prompt(problem_text, "fix_code", error_msg=output)
+            response = self.generate(prompt)
+            code = self.extract_python_code(response)
+            output = self.executor.execute(code)
+
+        # 3. Final Answer Extraction
+        try:
+            # If code printed a number, use it as the primary source
+            ans = int(float(output.strip()))
+            return ans % 100000
+        except:
+            pass
+
+        # 4. Fallback to step-by-step Chain-of-Thought
         prompt = format_prompt(problem_text, "cot")
-        response = generate(prompt)
-        ans = extract_answer(response)
+        response = self.generate(prompt)
+        return extract_answer(response)
+
+    def solve(self, problem_text: str, n_repetitions: int = 1) -> int:
+        """
+        Solves with optional majority voting.
+        """
+        from collections import Counter
         
-    # Final Modulo Constraint (AIMO often requires answer modulo 1000 or similar, but check rules)
-    # Rules say: "non-negative integers between 0 and 99999"
-    return int(ans) % 100000
+        answers = []
+        for _ in range(n_repetitions):
+            ans = self.solve_single_attempt(problem_text)
+            if ans >= 0:
+                answers.append(ans)
+        
+        if not answers:
+            return 0
+            
+        # Majority Vote (Self-Consistency)
+        counts = Counter(answers)
+        most_common, count = counts.most_common(1)[0]
+        return most_common

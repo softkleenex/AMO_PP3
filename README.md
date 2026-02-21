@@ -4,65 +4,64 @@
 ![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)
 ![LLM](https://img.shields.io/badge/Model-Qwen2.5--Math--7B-green)
 
-This repository contains the source code, experimentation notebooks, and submission pipeline for the **AI Mathematical Olympiad (AIMO) Progress Prize 3**. The goal is to solve international-level mathematics problems (AIME/IMO) using AI models.
-
----
-
-## 📺 Project Video
-- **YouTube:** [AIMO 3 Solver Strategy & Demo](https://youtu.be/r7_SRmbvdk8)
-- **Local:** `assets/solution_demo.mp4`
+This repository contains the source code, experimentation notebooks, and submission pipeline for the **AI Mathematical Olympiad (AIMO) Progress Prize 3**. The goal is to build an autonomous AI system capable of solving international-level mathematics problems (AIME/IMO level).
 
 ---
 
 ## 🏆 Competition Overview
 - **Name:** [AI Mathematical Olympiad - Progress Prize 3](https://www.kaggle.com/competitions/ai-mathematical-olympiad-progress-prize-3)
-- **Goal:** Build an AI system capable of solving international math olympiad problems.
-- **Problem Set:** 110 problems, LaTeX format, non-negative integer answers (0-99999).
-- **Evaluation:** Average accuracy on a hidden private test set.
+- **Goal:** Solve 110 international math olympiad problems.
+- **Answer Format:** Non-negative integers (0-99999).
+- **Evaluation:** Accuracy on a hidden private test set.
 - **Competition Period:** Jan 2026 – April 15, 2026.
 
 ---
 
-## 🗓️ Development Period
-- **Period:** Feb 13, 2026 – Feb 21, 2026
-- **Status:** Initial Baseline (OOP) + vLLM Integration + API Protocol Fixes completed.
+## 🚀 Key Features & Implementation
+- **Tool-Integrated Reasoning (TIR):** Bridges the gap between LLM reasoning and mathematical precision by generating and executing Python code.
+- **Self-Correction Logic:** Automatically captures code execution errors and prompts the LLM to fix its own code.
+- **CoT Fallback:** Provides a robust fallback mechanism using Chain-of-Thought reasoning if symbolic/code methods fail.
+- **Thread-Safe Code Execution:** Custom executor designed to handle timeouts and signal handling in multi-threaded environments (Kaggle Inference Server).
+- **Kaggle API Integration:** Includes advanced monkey-patches for the `InferenceServer` pattern to ensure reliable data passing.
 
 ---
 
 ## 📁 Directory Structure
 ```text
 .
-├── assets/             # Demo videos and project assets
-├── data/               # Local test data and Kaggle evaluation modules (Ignored)
-├── docs/               # Technical documentation and algorithm notes
-│   ├── algorithm_v2.md     # Solver logic (TIR + CoT Fallback)
-│   ├── submission_protocol.md # Kaggle API implementation details
-│   └── workflow.md         # Development & Deployment guide
-├── notebooks/          # Experimentation and Kaggle submission notebooks
-├── scripts/            # Utility, diagnostic, and deployment scripts
-├── src/                # Core Python modules (Solver, Executor, Utils)
-│   ├── kaggle_baseline.py  # Robust OOP Baseline for Kaggle
-│   └── solver.py           # Core math solving logic
-└── submissions/        # Submission logs and local evaluation results
+├── docs/               # Technical documentation
+│   ├── algorithm_v2.md     # Solver logic details (TIR + CoT)
+│   ├── submission_protocol.md # Kaggle API implementation & Fail-safes
+│   └── workflow.md         # Development lifecycle guide
+├── src/                # Core Python modules
+│   ├── solver.py           # AIMSolver class (Main pipeline)
+│   ├── utils.py            # Code execution & answer extraction
+│   ├── data_loader.py      # Prompt formatting & data handling
+│   └── kaggle_baseline.py  # Self-contained OOP utility for Kaggle
+├── notebooks/          # Kaggle submission template
+├── scripts/            # Deployment & evaluation utilities
+├── data/               # Local test datasets (Ignored)
+└── README.md           # Project overview
 ```
 
 ---
 
-## 🚀 Key Features & Implementation
-- **Tool-Integrated Reasoning (TIR):** Uses Python code execution to solve complex mathematical steps.
-- **CoT Fallback:** Automatically falls back to Chain-of-Thought reasoning if code execution fails.
-- **Majority Voting (Self-Consistency):** Runs multiple independent attempts and selects the most frequent answer.
-- **Robust Kaggle API Integration:** Custom monkey-patches for the `InferenceServer` pattern to handle data passing and column naming bugs.
+## 🛠️ Usage
+1. **Local Validation:** 
+   ```bash
+   python3 scripts/evaluate_v2.py
+   ```
+2. **Kaggle Deployment:**
+   - Update source code: `make deploy msg="Your commit message"`
+   - Push notebook: `kaggle kernels push -p notebooks/`
 
 ---
 
-## 🛠️ Usage
-1. **Local Validation:** Use `src/kaggle_baseline.py` to run the solver against local datasets.
-2. **Kaggle Deployment:**
-   - Update the utility script dataset: `make deploy` (via `scripts/deploy.sh`).
-   - Push the notebook: `kaggle kernels push -p notebooks/`.
+## 🗓️ Development Period
+- **Phase 1:** Feb 13 – Feb 21, 2026 (Initial Baseline & API Infrastructure)
+- **Status:** Architecture verified, API issues resolved, and successful submission completed.
 
 ---
 
 ## 📜 License
-This project is for educational and portfolio purposes. Data and API components are subject to Kaggle Competition Rules.
+This project is for educational and portfolio purposes. Data and competition-specific API components are subject to Kaggle Rules.

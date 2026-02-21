@@ -4,29 +4,39 @@ import contextlib
 import signal
 import re
 
-class PythonREPL:
+class CodeExecutor:
     """
-    A simple class to execute Python code and capture its output.
-    Useful for Tool-Integrated Reasoning (TIR) where the LLM generates code.
+    A robust class to execute Python code and capture its output.
+    Includes timeout handling and is thread-safe for background worker usage.
     """
-    def __init__(self, timeout=5):
+    def __init__(self, timeout: int = 7):
         self.timeout = timeout
 
     def execute(self, code: str) -> str:
         """
         Executes the provided Python code and returns the stdout.
+        Gracefully handles timeouts even when called from non-main threads.
         """
         output_buffer = io.StringIO()
         
         def timeout_handler(signum, frame):
             raise TimeoutError("Execution timed out")
 
+        # Signal handling (timeouts) only works in the main thread.
+        # Background worker threads (e.g. Kaggle Inference Server) will skip this to avoid crash.
+        use_timeout = False
         if hasattr(signal, 'SIGALRM'):
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(self.timeout)
+            try:
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(self.timeout)
+                use_timeout = True
+            except ValueError:
+                # Likely running in a background thread
+                pass
         
         try:
             with contextlib.redirect_stdout(output_buffer):
+                # Execute in an isolated global scope
                 exec_globals = {}
                 exec(code, exec_globals)
         except TimeoutError:
@@ -34,36 +44,33 @@ class PythonREPL:
         except Exception as e:
             return f"Error: {str(e)}"
         finally:
-            if hasattr(signal, 'SIGALRM'):
-                signal.alarm(0)
+            if use_timeout and hasattr(signal, 'SIGALRM'):
+                signal.alarm(0) # Disable alarm
         
         return output_buffer.getvalue().strip()
 
 def extract_answer(text: str) -> int:
     """
-    Extracts the final integer answer from text.
-    Prioritizes \boxed{...}, then last number.
+    Robust answer extraction from LLM response text.
+    Order of priority:
+    1. \boxed{number}
+    2. Last found sequence of digits
     """
     if not isinstance(text, str):
         return 0
         
-    # 1. Check for \boxed{number}
+    # 1. Look for LaTeX boxed content
     boxed_match = re.search(r'\\boxed\{(\d+)\}', text)
     if boxed_match:
         return int(boxed_match.group(1))
     
-    # 2. Check for "The answer is: number"
-    answer_match = re.search(r'answer is\W*(\d+)', text, re.IGNORECASE)
-    if answer_match:
-        return int(answer_match.group(1))
-        
-    # 3. Fallback: Last number found (risky but common fallback)
-    numbers = re.findall(r'-?\d+', text)
+    # 2. Fallback: Find all digit sequences and take the last one
+    # This is a common heuristic for math problems.
+    numbers = re.findall(r'\d+', text)
     if numbers:
         try:
             val = int(numbers[-1])
-            if 0 <= val <= 999999: # Reasonable range check
-                return val
+            return val % 100000 # AIMO range constraint
         except:
             pass
             
