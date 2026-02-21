@@ -96,9 +96,17 @@ class CodeExecutor:
             raise TimeoutError("Execution timed out")
 
         # Signal handling only works in main thread usually
+        # In AIMO 3, predict() is called in a worker thread, so this will crash if not handled.
+        use_timeout = False
         if hasattr(signal, 'SIGALRM'):
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(self.timeout)
+            try:
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(self.timeout)
+                use_timeout = True
+            except ValueError:
+                # Likely running in a background thread (gRPC worker)
+                # Skip timeout protection to avoid crash
+                pass
         
         try:
             with contextlib.redirect_stdout(output_buffer):
@@ -110,7 +118,7 @@ class CodeExecutor:
         except Exception as e:
             return f"Error: {str(e)}"
         finally:
-            if hasattr(signal, 'SIGALRM'):
+            if use_timeout and hasattr(signal, 'SIGALRM'):
                 signal.alarm(0)
         
         return output_buffer.getvalue().strip()

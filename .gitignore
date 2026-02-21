@@ -1,11 +1,23 @@
 # .gitignore
-data/*
+# Data and heavy outputs
+data/
 !data/.gitkeep
 submissions/*
 !submissions/.gitkeep
+
+# Python
 __pycache__/
-*.pyc
-.ipynb_checkpoints/
-.DS_Store
-.env
+*.py[cod]
+*$py.class
 venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Temporary Debug Folders (Safety)
+temp_*/
+*.log
