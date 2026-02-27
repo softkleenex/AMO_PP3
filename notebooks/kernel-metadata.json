@@ -10,7 +10,7 @@
   "enable_internet": false,
   "keywords": [],
   "dataset_sources": [
-    "softkleenex/aimo-pp3-modules"
+    "softkleenex/aimo-pp3-source"
   ],
   "kernel_sources": [
     "darraghdog/qwen2-5-math-7b-instruct-nemo-skills-tir"
