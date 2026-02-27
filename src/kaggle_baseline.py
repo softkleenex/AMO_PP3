@@ -12,91 +12,42 @@ from collections import Counter
 # 1. Configuration & Environment Handling
 # ==========================================
 class CompetitionConfig:
-    """
-    Central configuration that adapts to Local vs Kaggle environment.
-    """
     def __init__(self):
         self.is_kaggle = os.path.exists("/kaggle/input")
         
         if self.is_kaggle:
             self.base_dir = "/kaggle/input"
-            self.work_dir = "/kaggle/working"
-            # Path to the specific model directory in Kaggle
-            # User must add 'Qwen/Qwen2.5-Math-7B-Instruct' as a model/dataset
-            self.model_path = "/kaggle/input/qwen2.5-math-7b-instruct" 
+            # Kaggle에 추가할 Qwen 모델 경로 (예시)
+            self.model_path = "/kaggle/input/qwen2.5-math-7b-instruct/transformers/default/1" 
         else:
             self.base_dir = "./data"
-            self.work_dir = "./submissions"
-            self.model_path = "./models/qwen2.5-math" # Local path
+            self.model_path = "Qwen/Qwen2.5-Math-1.5B-Instruct" # 로컬 테스트용 가벼운 모델
 
-        # Common Settings
-        self.timeout_seconds = 7
-        self.max_retries = 2
-        self.n_repetitions = 5 # Majority Voting Count
-        self.debug = True
-
-    def get_dataset_path(self, filename: str) -> str:
-        """Finds a file in common locations to avoid path errors."""
-        possible_paths = [
-            os.path.join(self.base_dir, filename),
-            os.path.join(self.base_dir, "ai-mathematical-olympiad-prize", filename),
-            filename # relative path fallback
-        ]
-        for path in possible_paths:
-            if os.path.exists(path):
-                return path
-        if self.debug:
-            print(f"Warning: File {filename} not found in {possible_paths}")
-        return filename
+        # 하이퍼파라미터 (Top-tier 커널 참고)
+        self.timeout_seconds = 10
+        self.n_repetitions = 16  # 한 문제당 16번 다르게 풀기 시도
+        self.temperature = 0.7   # 다양한 풀이 경로를 위한 높은 온도
+        self.max_tokens = 2048
+        self.gpu_memory_utilization = 0.95
 
 # ==========================================
-# 2. Abstract Model Interface
-# ==========================================
-class LLMInterface(ABC):
-    @abstractmethod
-    def generate(self, prompt: str) -> str:
-        pass
-
-class MockLLM(LLMInterface):
-    """Used for testing pipeline without loading heavy models."""
-    def generate(self, prompt: str) -> str:
-        if "step-by-step" in prompt:
-            return "The answer is \\boxed{42}."
-        # Randomize slightly for voting test
-        import random
-        return f"print({random.choice([42, 42, 42, 0])})"
-
-# Placeholder for real vLLM or HF implementation
-class LocalVLLM(LLMInterface):
-    def __init__(self, model_path: str):
-        # try:
-        #     from vllm import LLM, SamplingParams
-        #     self.model = LLM(model=model_path, trust_remote_code=True)
-        #     self.params = SamplingParams(temperature=0.7, max_tokens=1024)
-        # except ImportError:
-        #     print("vLLM not installed. Using Mock.")
-        pass
-
-    def generate(self, prompt: str) -> str:
-        # output = self.model.generate([prompt], self.params)
-        # return output[0].outputs[0].text
-        return "print(0) # Placeholder for vLLM"
-
-# ==========================================
-# 3. Code Execution Environment
+# 2. Code Execution Environment (Stateful)
 # ==========================================
 class CodeExecutor:
+    """Thread-safe, optionally stateful Python executor."""
     def __init__(self, timeout: int = 5):
         self.timeout = timeout
+        self.globals_dict = {} # 상태 유지를 위한 전역 변수 사전
 
-    def execute(self, code: str) -> str:
+    def execute(self, code: str, reset_state: bool = True) -> str:
+        if reset_state:
+            self.globals_dict = {}
+            
         output_buffer = io.StringIO()
         
         def timeout_handler(signum, frame):
             raise TimeoutError("Execution timed out")
 
-        # Signal handling only works in main thread usually
-        # In AIMO 3, predict() is called in a worker thread, so this will crash if not handled.
         use_timeout = False
         if hasattr(signal, 'SIGALRM'):
             try:
@@ -104,24 +55,65 @@ class CodeExecutor:
                 signal.alarm(self.timeout)
                 use_timeout = True
             except ValueError:
-                # Likely running in a background thread (gRPC worker)
-                # Skip timeout protection to avoid crash
-                pass
+                pass # 백그라운드 스레드 무시
         
         try:
             with contextlib.redirect_stdout(output_buffer):
-                # Unsafe exec - in Kaggle this is isolated, locally be careful
-                exec_globals = {}
-                exec(code, exec_globals)
+                # 기본적인 수학 라이브러리 자동 임포트
+                exec("import math\nimport sympy\nimport numpy as np\n", self.globals_dict)
+                exec(code, self.globals_dict)
         except TimeoutError:
             return "Error: Execution timed out."
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: {type(e).__name__}: {str(e)}"
         finally:
             if use_timeout and hasattr(signal, 'SIGALRM'):
                 signal.alarm(0)
         
         return output_buffer.getvalue().strip()
+
+# ==========================================
+# 3. Model Interface (vLLM Batched)
+# ==========================================
+class LLMInterface(ABC):
+    @abstractmethod
+    def generate_batch(self, prompts: List[str]) -> List[str]:
+        pass
+
+class VLLMEngine(LLMInterface):
+    """Real vLLM integration for high-throughput batch generation."""
+    def __init__(self, config: CompetitionConfig):
+        try:
+            from vllm import LLM, SamplingParams
+            print(f"Loading vLLM model from {config.model_path}...")
+            # VRAM을 꽉 채워 쓰도록 설정
+            self.model = LLM(
+                model=config.model_path, 
+                trust_remote_code=True,
+                tensor_parallel_size=1,
+                gpu_memory_utilization=config.gpu_memory_utilization,
+                max_model_len=4096, # 컨텍스트 길이 최적화
+                enforce_eager=True # Kaggle 환경 호환성
+            )
+            self.sampling_params = SamplingParams(
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+                top_p=0.9,
+                stop=["```\n", "User:", "<|im_end|>"]
+            )
+            self.is_mock = False
+            print("vLLM loaded successfully.")
+        except ImportError:
+            print("⚠️ vLLM not installed. Falling back to MockLLM.")
+            self.is_mock = True
+            
+    def generate_batch(self, prompts: List[str]) -> List[str]:
+        if self.is_mock:
+            import random
+            return [f"The answer is \\boxed{{{random.randint(1, 100)}}}" for _ in prompts]
+            
+        outputs = self.model.generate(prompts, self.sampling_params, use_tqdm=False)
+        return [output.outputs[0].text for output in outputs]
 
 # ==========================================
 # 4. Main Solver Logic
@@ -130,95 +122,52 @@ class AIMSolver:
     def __init__(self, config: CompetitionConfig, llm: LLMInterface):
         self.config = config
         self.llm = llm
-        self.executor = CodeExecutor(timeout=config.timeout_seconds)
-
-    def extract_code(self, text: str) -> str:
-        match = re.search(r'```python\n(.*?)\n```', text, re.DOTALL)
-        return match.group(1) if match else text
+        
+    def format_prompt(self, problem: str) -> str:
+        """Qwen Math Instruct Template"""
+        system = "You are an expert mathematician. Solve the problem step-by-step. If you write Python code, enclose it in ```python\n...\n```. Always put your final answer inside \\boxed{}."
+        return f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{problem}<|im_end|>\n<|im_start|>assistant\n"
 
     def extract_answer(self, text: str) -> int:
-        # 1. Boxed
-        match = re.search(r'\\boxed\{(\d+)\}', text)
-        if match: return int(match.group(1))
-        # 2. Last number fallback
-        numbers = re.findall(r'\d+', text)
-        if numbers:
+        match = re.search(r'\\boxed\{([0-9,]+)\}', text)
+        if match: 
             try:
-                val = int(numbers[-1])
-                return val % 1000 
+                return int(match.group(1).replace(',', '')) % 100000
             except: pass
-        return -1 # Indicator for no answer found
-
-    def format_prompt(self, problem: str, mode: str = "code", error: str = None) -> str:
-        if mode == "code":
-            examples = (
-                "Problem: Find the sum of the first 10 integers.\n"
-                "Code:\n"
-                "```python\n"
-                "print(sum(range(1, 11)))\n"
-                "```\n\n"
-                "Problem: What is the remainder when 123 is divided by 10?\n"
-                "Code:\n"
-                "```python\n"
-                "print(123 % 10)\n"
-                "```\n\n"
-            )
-            return (
-                "Write a Python script to solve this math problem. "
-                "Print the answer at the end.\n\n"
-                f"{examples}"
-                f"Problem: {problem}\n\nCode:"
-            )
-        elif mode == "fix":
-            return (
-                f"Previous code error: {error}\n"
-                "Fix the code and solve:\n\nCode:"
-            )
-        return f"Solve step-by-step. Put answer in \\boxed{{}}.\nProblem: {problem}"
-
-    def _solve_single(self, problem_text: str) -> int:
-        # Strategy: Code Gen -> Retry -> CoT
         
-        # 1. Initial Code Attempt
-        prompt = self.format_prompt(problem_text, "code")
-        response = self.llm.generate(prompt)
-        code = self.extract_code(response)
-        output = self.executor.execute(code)
-        
-        # 2. Retry if Error
-        if "Error" in output:
-            prompt = self.format_prompt(problem_text, "fix", error=output)
-            response = self.llm.generate(prompt)
-            code = self.extract_code(response)
-            output = self.executor.execute(code)
-
-        # 3. Answer Extraction
-        try:
-            # If code printed a number, use it
-            ans = int(float(output.strip()))
-            return ans % 1000 # Modulo check
-        except:
-            pass
-
-        # 4. Fallback to CoT
-        prompt = self.format_prompt(problem_text, "cot")
-        response = self.llm.generate(prompt)
-        return self.extract_answer(response)
+        # Fallback
+        match = re.search(r'final answer is\s*([0-9,]+)', text, re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1).replace(',', '')) % 100000
+            except: pass
+        return -1
 
     def solve(self, problem_text: str) -> int:
         """
-        Executes majority voting (self-consistency).
+        Batched generation for Majority Voting.
+        1. 16개의 프롬프트를 한 번에 생성
+        2. 병렬로 응답 수집
+        3. 가장 많이 나온 답 선택
         """
-        answers = []
-        for _ in range(self.config.n_repetitions):
-            ans = self._solve_single(problem_text)
-            if ans >= 0: # valid answer
-                answers.append(ans)
+        # Create N identical prompts for sampling diverse paths (due to temp=0.7)
+        prompts = [self.format_prompt(problem_text)] * self.config.n_repetitions
         
-        if not answers:
+        # Batch Generate (vLLM handles this extremely efficiently)
+        responses = self.llm.generate_batch(prompts)
+        
+        valid_answers = []
+        for resp in responses:
+            ans = self.extract_answer(resp)
+            if ans >= 0:
+                valid_answers.append(ans)
+                
+        if not valid_answers:
+            print("No valid answers found. Returning 0.")
             return 0
             
         # Majority Vote
-        counts = Counter(answers)
+        counts = Counter(valid_answers)
         most_common, count = counts.most_common(1)[0]
+        print(f"Votes: {dict(counts)} -> Selected: {most_common}")
         return most_common
