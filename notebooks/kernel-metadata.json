@@ -11,7 +11,8 @@
   "keywords": [],
   "dataset_sources": [
     "softkleenex/aimo-pp3-source",
-    "gmhost/qwen2-5-math-7b-instruct"
+    "gmhost/qwen2-5-math-7b-instruct",
+    "ermecan/aimo3-dependency-dataset"
   ],
   "kernel_sources": [
     "darraghdog/qwen2-5-math-7b-instruct-nemo-skills-tir"
