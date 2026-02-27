@@ -18,7 +18,7 @@ class CompetitionConfig:
         if self.is_kaggle:
             self.base_dir = "/kaggle/input"
             # Kaggle에 추가할 Qwen 모델 경로 (예시)
-            self.model_path = "/kaggle/input/qwen2.5-math-7b-instruct/transformers/default/1" 
+            self.model_path = "/kaggle/input/qwen2-5-math-7b-instruct" 
         else:
             self.base_dir = "./data"
             self.model_path = "Qwen/Qwen2.5-Math-1.5B-Instruct" # 로컬 테스트용 가벼운 모델
