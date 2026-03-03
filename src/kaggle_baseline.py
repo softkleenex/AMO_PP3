@@ -1,173 +1,182 @@
 import os
 import sys
 import re
-import io
+import math
+import time
+import queue
+import threading
 import contextlib
-import signal
-from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
-from collections import Counter
+from typing import Optional, List, Dict, Any
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+import pandas as pd
+import polars as pl
+from jupyter_client import KernelManager
 
 # ==========================================
-# 1. Configuration & Environment Handling
+# 1. Configuration for P100 Compatibility
 # ==========================================
-class CompetitionConfig:
-    def __init__(self):
-        self.is_kaggle = os.path.exists("/kaggle/input")
-        
-        if self.is_kaggle:
-            self.base_dir = "/kaggle/input"
-            # Kaggle에 추가할 Qwen 모델 경로 (예시)
-            self.model_path = "/kaggle/input/qwen2-5-math-7b-instruct" 
-        else:
-            self.base_dir = "./data"
-            self.model_path = "Qwen/Qwen2.5-Math-1.5B-Instruct" # 로컬 테스트용 가벼운 모델
+class CFG:
+    is_kaggle = os.path.exists("/kaggle/input")
+    
+    # Model Paths
+    model_path = '/kaggle/input/qwen2-5-math-7b-instruct' if is_kaggle else 'Qwen/Qwen2.5-Math-1.5B-Instruct'
+    
+    # Device Management
+    # P100 has 16GB VRAM. 7B model in FP16 takes ~14GB. 
+    # We must be extremely careful with memory.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 # P100 does NOT support bfloat16
+    
+    # Generation Params
+    temperature = 0.7
+    top_p = 0.9
+    max_new_tokens = 1024
+    
+    # Concurrency
+    # Since we use Transformers (not vLLM), we can't easily do parallel inference on one GPU.
+    # We will process attempts sequentially but keep the stateful sandbox logic.
+    n_repetitions = 8  # Reduced from 16 to save time (Transformers is slower)
+    max_turns = 5      # Max TIR turns
+    
+    system_prompt = (
+        "You are an expert mathematician. Solve the problem by thinking step-by-step. "
+        "You can write Python code to help you calculate or verify. "
+        "Enclose your code in ```python\n...\n``` blocks. "
+        "Always print the results of your calculations. "
+        "Once you are absolutely sure of the final integer answer, place it inside \\boxed{}."
+    )
 
-        # 하이퍼파라미터 (Top-tier 커널 참고)
-        self.timeout_seconds = 10
-        self.n_repetitions = 16  # 한 문제당 16번 다르게 풀기 시도
-        self.temperature = 0.7   # 다양한 풀이 경로를 위한 높은 온도
-        self.max_tokens = 2048
-        self.gpu_memory_utilization = 0.95
+# ==========================================
+# 2. Stateful Jupyter Sandbox (Same as before)
+# ==========================================
+class PythonSandbox:
+    _port_lock = threading.Lock()
+    _next_port = 50000
 
-# ==========================================
-# 2. Code Execution Environment (Stateful)
-# ==========================================
-class CodeExecutor:
-    """Thread-safe, optionally stateful Python executor."""
-    def __init__(self, timeout: int = 5):
+    @classmethod
+    def _get_ports(cls) -> list:
+        with cls._port_lock:
+            ports = list(range(cls._next_port, cls._next_port + 5))
+            cls._next_port += 5
+            return ports
+
+    def __init__(self, timeout: float = 10):
         self.timeout = timeout
-        self.globals_dict = {} # 상태 유지를 위한 전역 변수 사전
+        ports = self._get_ports()
+        env = os.environ.copy()
+        self.km = KernelManager()
+        self.km.shell_port, self.km.iopub_port, self.km.stdin_port, self.km.hb_port, self.km.control_port = ports
+        self.km.start_kernel(env=env, extra_arguments=['--Application.log_level=CRITICAL'])
+        self.client = self.km.blocking_client()
+        self.client.start_channels()
+        self.client.wait_for_ready(timeout=10)
+        self.execute("import math, sympy\nfrom sympy import *\n")
 
-    def execute(self, code: str, reset_state: bool = True) -> str:
-        if reset_state:
-            self.globals_dict = {}
-            
-        output_buffer = io.StringIO()
-        
-        def timeout_handler(signum, frame):
-            raise TimeoutError("Execution timed out")
-
-        use_timeout = False
-        if hasattr(signal, 'SIGALRM'):
+    def execute(self, code: str) -> str:
+        msg_id = self.client.execute(code, store_history=True, allow_stdin=False)
+        stdout_parts, stderr_parts = [], []
+        start_time = time.time()
+        while True:
+            if time.time() - start_time > self.timeout:
+                self.km.interrupt_kernel()
+                return "[Error] Timeout"
             try:
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(self.timeout)
-                use_timeout = True
-            except ValueError:
-                pass # 백그라운드 스레드 무시
+                msg = self.client.get_iopub_msg(timeout=0.5)
+            except queue.Empty: continue
+            if msg.get('parent_header', {}).get('msg_id') != msg_id: continue
+            msg_type = msg.get('msg_type')
+            if msg_type == 'stream':
+                stdout_parts.append(msg['content']['text'])
+            elif msg_type == 'error':
+                stderr_parts.append('\n'.join(msg['content']['traceback']))
+            elif msg_type == 'status' and msg['content']['execution_state'] == 'idle':
+                break
+        res = ''.join(stdout_parts + stderr_parts).strip()
+        return re.sub(r'\x1b\[[0-9;]*m', '', res) if res else "[Success]"
+
+    def close(self):
+        try: self.client.stop_channels(); self.km.shutdown_kernel(now=True)
+        except: pass
+
+# ==========================================
+# 3. Transformers Engine
+# ==========================================
+class HFEngine:
+    def __init__(self, cfg: CFG):
+        print(f"Loading Model: {cfg.model_path} on {cfg.device}...")
+        self.tokenizer = AutoTokenizer.from_pretrained(cfg.model_path, trust_remote_code=True)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            cfg.model_path,
+            device_map="auto", # Automatically balances across GPU/CPU
+            torch_dtype=cfg.dtype,
+            trust_remote_code=True
+        )
+        self.cfg = cfg
+
+    def generate(self, messages: List[Dict]) -> str:
+        text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
         
-        try:
-            with contextlib.redirect_stdout(output_buffer):
-                # 기본적인 수학 라이브러리 자동 임포트
-                exec("import math\nimport sympy\nimport numpy as np\n", self.globals_dict)
-                exec(code, self.globals_dict)
-        except TimeoutError:
-            return "Error: Execution timed out."
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {str(e)}"
-        finally:
-            if use_timeout and hasattr(signal, 'SIGALRM'):
-                signal.alarm(0)
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=self.cfg.max_new_tokens,
+                do_sample=True,
+                temperature=self.cfg.temperature,
+                top_p=self.cfg.top_p,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
         
-        return output_buffer.getvalue().strip()
+        generated_ids = [output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids, outputs)]
+        return self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
 # ==========================================
-# 3. Model Interface (vLLM Batched)
-# ==========================================
-class LLMInterface(ABC):
-    @abstractmethod
-    def generate_batch(self, prompts: List[str]) -> List[str]:
-        pass
-
-class VLLMEngine(LLMInterface):
-    """Real vLLM integration for high-throughput batch generation."""
-    def __init__(self, config: CompetitionConfig):
-        try:
-            from vllm import LLM, SamplingParams
-            print(f"Loading vLLM model from {config.model_path}...")
-            # VRAM을 꽉 채워 쓰도록 설정
-            self.model = LLM(
-                model=config.model_path, 
-                trust_remote_code=True,
-                tensor_parallel_size=1,
-                gpu_memory_utilization=config.gpu_memory_utilization,
-                max_model_len=4096, # 컨텍스트 길이 최적화
-                enforce_eager=True # Kaggle 환경 호환성
-            )
-            self.sampling_params = SamplingParams(
-                temperature=config.temperature,
-                max_tokens=config.max_tokens,
-                top_p=0.9,
-                stop=["```\n", "User:", "<|im_end|>"]
-            )
-            self.is_mock = False
-            print("vLLM loaded successfully.")
-        except ImportError:
-            print("⚠️ vLLM not installed. Falling back to MockLLM.")
-            self.is_mock = True
-            
-    def generate_batch(self, prompts: List[str]) -> List[str]:
-        if self.is_mock:
-            import random
-            return [f"The answer is \\boxed{{{random.randint(1, 100)}}}" for _ in prompts]
-            
-        outputs = self.model.generate(prompts, self.sampling_params, use_tqdm=False)
-        return [output.outputs[0].text for output in outputs]
-
-# ==========================================
-# 4. Main Solver Logic
+# 4. Solver Logic
 # ==========================================
 class AIMSolver:
-    def __init__(self, config: CompetitionConfig, llm: LLMInterface):
-        self.config = config
-        self.llm = llm
-        
-    def format_prompt(self, problem: str) -> str:
-        """Qwen Math Instruct Template"""
-        system = "You are an expert mathematician. Solve the problem step-by-step. If you write Python code, enclose it in ```python\n...\n```. Always put your final answer inside \\boxed{}."
-        return f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{problem}<|im_end|>\n<|im_start|>assistant\n"
+    def __init__(self, cfg: CFG):
+        self.cfg = cfg
+        self.engine = HFEngine(cfg)
+        self.sandbox = PythonSandbox()
 
-    def extract_answer(self, text: str) -> int:
-        match = re.search(r'\\boxed\{([0-9,]+)\}', text)
-        if match: 
-            try:
-                return int(match.group(1).replace(',', '')) % 100000
-            except: pass
+    def solve(self, problem: str) -> int:
+        print(f"\n--- Solving: {problem[:50]}... ---")
+        answers = []
+        for i in range(self.cfg.n_repetitions):
+            ans = self._solve_single(problem)
+            if ans is not None:
+                answers.append(ans)
+                # Early stop if we have a strong consensus
+                counts = Counter(answers)
+                if counts.most_common(1)[0][1] >= 3: break
         
-        # Fallback
-        match = re.search(r'final answer is\s*([0-9,]+)', text, re.IGNORECASE)
-        if match:
-            try:
-                return int(match.group(1).replace(',', '')) % 100000
-            except: pass
-        return -1
+        if not answers: return 0
+        final = Counter(answers).most_common(1)[0][0]
+        print(f"Result: {final} (Votes: {dict(Counter(answers))})")
+        return final
 
-    def solve(self, problem_text: str) -> int:
-        """
-        Batched generation for Majority Voting.
-        1. 16개의 프롬프트를 한 번에 생성
-        2. 병렬로 응답 수집
-        3. 가장 많이 나온 답 선택
-        """
-        # Create N identical prompts for sampling diverse paths (due to temp=0.7)
-        prompts = [self.format_prompt(problem_text)] * self.config.n_repetitions
-        
-        # Batch Generate (vLLM handles this extremely efficiently)
-        responses = self.llm.generate_batch(prompts)
-        
-        valid_answers = []
-        for resp in responses:
-            ans = self.extract_answer(resp)
-            if ans >= 0:
-                valid_answers.append(ans)
-                
-        if not valid_answers:
-            print("No valid answers found. Returning 0.")
-            return 0
+    def _solve_single(self, problem: str) -> Optional[int]:
+        messages = [
+            {"role": "system", "content": self.cfg.system_prompt},
+            {"role": "user", "content": problem}
+        ]
+        for _ in range(self.cfg.max_turns):
+            response = self.engine.generate(messages)
+            messages.append({"role": "assistant", "content": response})
             
-        # Majority Vote
-        counts = Counter(valid_answers)
-        most_common, count = counts.most_common(1)[0]
-        print(f"Votes: {dict(counts)} -> Selected: {most_common}")
-        return most_common
+            # Answer extraction
+            match = re.search(r'\\boxed\{([0-9,]+)\}', response)
+            if match: return int(match.group(1).replace(',', '')) % 100000
+            
+            # Code execution
+            code_match = re.search(r'```python\n(.*?)\n```', response, re.DOTALL)
+            if code_match:
+                output = self.sandbox.execute(code_match.group(1))
+                messages.append({"role": "user", "content": f"```output\n{output}\n```"})
+            else:
+                break
+        return None
