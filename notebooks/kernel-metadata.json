@@ -14,8 +14,7 @@
     "gmhost/qwen2-5-math-7b-instruct"
   ],
   "kernel_sources": [
-    "darraghdog/qwen2-5-math-7b-instruct-nemo-skills-tir",
-    "andreasbis/aimo-3-utils"
+    "darraghdog/qwen2-5-math-7b-instruct-nemo-skills-tir"
   ],
   "competition_sources": [
     "ai-mathematical-olympiad-progress-prize-3"
